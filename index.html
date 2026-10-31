@@ -98,7 +98,7 @@
             
             if (currentList.length === 0) throw new Error("데이터가 비어있음");
             
-            statusBar.innerText = `성공: ${currentList.length}개의 N3 단어 로드 완료`;
+            statusBar.innerText = `성공: ${currentList.length}개의 단어 로드 완료`;
             nextProblem();
         } catch (e) {
             statusBar.innerText = "🚨 API 로드 실패: 외부 서버 에러 혹은 CORS 차단";
