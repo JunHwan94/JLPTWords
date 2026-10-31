@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>N3 Master Console</title>
+    <style>
+        :root { --primary: #007aff; --bg: #f2f2f7; }
+        body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .container { width: 100%; max-width: 400px; }
+        .card { background: #fff; border-radius: 20px; padding: 40px 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); text-align: center; min-height: 280px; display: flex; flex-direction: column; justify-content: center; margin-bottom: 20px; border: 1px solid #e5e5ea; position: relative; }
+        .q { font-size: 3.5rem; font-weight: 800; color: #1c1c1e; margin: 0; word-break: keep-all; }
+        .a { font-size: 1.5rem; color: var(--primary); margin-top: 15px; opacity: 0; transition: 0.3s; white-space: pre-line; line-height: 1.4; }
+        .a.show { opacity: 1; }
+        .meaning { font-size: 1.15rem; color: #1c1c1e; margin-top: 8px; }
+        .btn-group { display: flex; gap: 10px; }
+        button { flex: 1; padding: 18px; border: none; border-radius: 15px; font-size: 1.1rem; font-weight: 700; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+        button:active { opacity: 0.7; transform: scale(0.98); }
+        .btn-ans { background: #e5e5ea; color: #1c1c1e; }
+        .btn-next { background: var(--primary); color: white; }
+        .btn-speak { flex: 0 0 auto; align-self: center; margin-top: 20px; padding: 12px 18px; background: #eaf3ff; color: var(--primary); }
+        .status { text-align: center; font-size: 0.75rem; color: #8e8e93; margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="card" onclick="reveal()">
+        <p id="q-txt" class="q">API 연결 중...</p>
+        <button class="btn-speak" onclick="speakWord(event)" aria-label="일본어 단어 발음 듣기">🔊 발음 듣기</button>
+        <p id="reading-txt" class="a"></p>
+        <p id="meaning-txt" class="a meaning"></p>
+    </div>
+    <div class="btn-group">
+        <button class="btn-ans" onclick="reveal()">정답 확인</button>
+        <button class="btn-next" onclick="nextProblem()">다음 문제</button>
+    </div>
+    <p id="status-bar" class="status">데이터 요청 대기 중</p>
+</div>
+
+<script>
+    // 유저가 지정한 API 주소 (N3 레벨 타겟팅)
+    const BASE_API_URL = "https://jlpt-vocab-api.vercel.app/api/words?level=2&limit=100";
+    
+    let currentList = [];
+    let currentWord = "";
+    let currentReading = "";
+    let meaningRequestId = 0;
+    const translationCache = new Map();
+
+    async function fetchData() {
+        const statusBar = document.getElementById('status-bar');
+        try {
+            const res = await fetch(BASE_API_URL);
+            if (!res.ok) throw new Error("서버 응답 에러");
+            
+            const data = await res.json();
+            
+            // API 응답 구조가 배열인지, 혹은 특정 객체 내부(예: data.words 등)에 있는지 체크하여 바인딩
+            currentList = Array.isArray(data) ? data : (data.words || data.data || []);
+            
+            if (currentList.length === 0) throw new Error("데이터가 비어있음");
+            
+            statusBar.innerText = `성공: ${currentList.length}개의 N3 단어 로드 완료`;
+            nextProblem();
+        } catch (e) {
+            statusBar.innerText = "🚨 API 로드 실패: 외부 서버 에러 혹은 CORS 차단";
+            document.getElementById('q-txt').innerText = "접속 실패";
+            document.getElementById('meaning-txt').innerText = "인터넷 연결 및 API 엔드포인트를 확인하세요.";
+            document.getElementById('meaning-txt').classList.add('show');
+            console.error(e);
+        }
+    }
+
+    function nextProblem() {
+        if (currentList.length === 0) return;
+        
+        const item = currentList[Math.floor(Math.random() * currentList.length)];
+        
+        // API의 다양한 필드명 템플릿 대응 (word, kanji, furigana, reading, meaning, definition 등)
+        const word = item.word || item.kanji || item.expression || "단어 없음";
+        const reading = item.reading || item.furigana || item.yomikata || "";
+        const meaning = item.meaning || item.definition || item.translation || "뜻 없음";
+        const requestId = ++meaningRequestId;
+        currentWord = word;
+        currentReading = reading;
+        
+        document.getElementById('q-txt').innerText = word;
+        document.getElementById('reading-txt').innerText = reading ? `읽기: ${reading}` : "";
+        document.getElementById('meaning-txt').innerText = "한국어 뜻을 불러오는 중...";
+        document.getElementById('reading-txt').classList.remove('show');
+        document.getElementById('meaning-txt').classList.remove('show');
+        translateMeaning(String(meaning), requestId);
+    }
+
+    async function translateMeaning(meaning, requestId) {
+        try {
+            let translated = translationCache.get(meaning);
+            if (!translated) {
+                const params = new URLSearchParams({ q: meaning, langpair: "en|ko" });
+                const res = await fetch(`https://api.mymemory.translated.net/get?${params}`);
+                if (!res.ok) throw new Error("번역 서버 응답 에러");
+
+                const data = await res.json();
+                translated = data.responseData?.translatedText;
+                if (data.responseStatus !== 200 || !translated) {
+                    throw new Error(data.responseDetails || "번역 결과가 없습니다.");
+                }
+                translationCache.set(meaning, translated);
+            }
+
+            if (requestId === meaningRequestId) {
+                document.getElementById('meaning-txt').innerText = `한국어 뜻: ${translated}`;
+            }
+        } catch (e) {
+            if (requestId === meaningRequestId) {
+                document.getElementById('meaning-txt').innerText = `한국어 번역 실패 (원문: ${meaning})`;
+            }
+            console.error(e);
+        }
+    }
+
+    function reveal() {
+        document.getElementById('reading-txt').classList.add('show');
+        document.getElementById('meaning-txt').classList.add('show');
+    }
+
+    function speakWord(event) {
+        event.stopPropagation();
+        if (!currentWord) return;
+        if (!("speechSynthesis" in window)) {
+            document.getElementById('status-bar').innerText = "이 브라우저는 발음 재생을 지원하지 않습니다.";
+            return;
+        }
+
+        const utterance = new SpeechSynthesisUtterance(currentReading || currentWord);
+        utterance.lang = "ja-JP";
+        const japaneseVoice = speechSynthesis.getVoices().find(voice => voice.lang.startsWith("ja"));
+        if (japaneseVoice) utterance.voice = japaneseVoice;
+        speechSynthesis.cancel();
+        speechSynthesis.speak(utterance);
+    }
+
+    // 파일 구동 시 즉시 API 호출
+    fetchData();
+</script>
+
+</body>
+</html>
