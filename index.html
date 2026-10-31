@@ -19,6 +19,7 @@
         .btn-ans { background: #e5e5ea; color: #1c1c1e; }
         .btn-next { background: var(--primary); color: white; }
         .btn-speak { flex: 0 0 auto; align-self: center; margin-top: 20px; padding: 12px 18px; background: #eaf3ff; color: var(--primary); }
+        .voice-select { max-width: 100%; margin-top: 10px; padding: 8px 10px; border: 1px solid #d1d1d6; border-radius: 10px; background: #fff; font-size: 0.9rem; }
         .status { text-align: center; font-size: 0.75rem; color: #8e8e93; margin-top: 15px; }
     </style>
 </head>
@@ -28,6 +29,10 @@
     <div class="card" onclick="reveal()">
         <p id="q-txt" class="q">API 연결 중...</p>
         <button class="btn-speak" onclick="speakWord(event)" aria-label="일본어 단어 발음 듣기">🔊 발음 듣기</button>
+        <label for="voice-select">일본어 음성</label>
+        <select id="voice-select" class="voice-select" aria-label="일본어 발음 음성 선택" disabled>
+            <option>기기 음성 불러오는 중...</option>
+        </select>
         <p id="reading-txt" class="a"></p>
         <p id="meaning-txt" class="a meaning"></p>
     </div>
@@ -47,6 +52,38 @@
     let currentReading = "";
     let meaningRequestId = 0;
     const translationCache = new Map();
+    let japaneseVoices = [];
+
+    function voiceKey(voice) {
+        return `${voice.voiceURI}|${voice.name}|${voice.lang}`;
+    }
+
+    function loadJapaneseVoices() {
+        const voiceSelect = document.getElementById('voice-select');
+        const selectedVoice = japaneseVoices[Number(voiceSelect.value)];
+        const selectedKey = selectedVoice ? voiceKey(selectedVoice) : "";
+
+        japaneseVoices = speechSynthesis.getVoices()
+            .filter(voice => voice.lang.toLowerCase().startsWith("ja"))
+            .sort((a, b) => Number(b.default) - Number(a.default) || a.name.localeCompare(b.name));
+
+        voiceSelect.replaceChildren();
+        if (japaneseVoices.length === 0) {
+            voiceSelect.add(new Option("사용 가능한 일본어 음성 없음", ""));
+            voiceSelect.disabled = true;
+            return;
+        }
+
+        japaneseVoices.forEach((voice, index) => {
+            const option = new Option(`${voice.name} (${voice.lang})`, String(index));
+            voiceSelect.add(option);
+        });
+        voiceSelect.disabled = false;
+
+        const preferredIndex = japaneseVoices.findIndex(voice => voiceKey(voice) === selectedKey);
+        const defaultIndex = japaneseVoices.findIndex(voice => voice.default);
+        voiceSelect.value = String(preferredIndex >= 0 ? preferredIndex : Math.max(defaultIndex, 0));
+    }
 
     async function fetchData() {
         const statusBar = document.getElementById('status-bar');
@@ -133,12 +170,23 @@
             return;
         }
 
+        loadJapaneseVoices();
+        const voice = japaneseVoices[Number(document.getElementById('voice-select').value)];
+        if (!voice) {
+            document.getElementById('status-bar').innerText = "기기 설정에서 일본어 음성을 설치한 뒤 다시 시도해 주세요.";
+            return;
+        }
+
         const utterance = new SpeechSynthesisUtterance(currentReading || currentWord);
         utterance.lang = "ja-JP";
-        const japaneseVoice = speechSynthesis.getVoices().find(voice => voice.lang.startsWith("ja"));
-        if (japaneseVoice) utterance.voice = japaneseVoice;
+        utterance.voice = voice;
         speechSynthesis.cancel();
         speechSynthesis.speak(utterance);
+    }
+
+    if ("speechSynthesis" in window) {
+        loadJapaneseVoices();
+        speechSynthesis.onvoiceschanged = loadJapaneseVoices;
     }
 
     // 파일 구동 시 즉시 API 호출
