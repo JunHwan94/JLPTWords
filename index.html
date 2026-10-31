@@ -48,6 +48,8 @@
     const BASE_API_URL = "https://jlpt-vocab-api.vercel.app/api/words?level=2&limit=100";
     
     let currentList = [];
+    let wordDeck = [];
+    let lastWordKey = "";
     let currentWord = "";
     let currentReading = "";
     let meaningRequestId = 0;
@@ -85,6 +87,32 @@
         voiceSelect.value = String(preferredIndex >= 0 ? preferredIndex : Math.max(defaultIndex, 0));
     }
 
+    function getWord(item) {
+        return String(item.word || item.kanji || item.expression || "단어 없음").trim();
+    }
+
+    function drawNextItem() {
+        if (wordDeck.length === 0) {
+            wordDeck = [...currentList];
+            for (let i = wordDeck.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [wordDeck[i], wordDeck[j]] = [wordDeck[j], wordDeck[i]];
+            }
+
+            if (wordDeck.length > 1 && getWord(wordDeck[wordDeck.length - 1]).normalize("NFC") === lastWordKey) {
+                const swapIndex = wordDeck.findIndex((item, index) =>
+                    index < wordDeck.length - 1 && getWord(item).normalize("NFC") !== lastWordKey
+                );
+                [wordDeck[wordDeck.length - 1], wordDeck[swapIndex]] =
+                    [wordDeck[swapIndex], wordDeck[wordDeck.length - 1]];
+            }
+        }
+
+        const item = wordDeck.pop();
+        lastWordKey = getWord(item).normalize("NFC");
+        return item;
+    }
+
     async function fetchData() {
         const statusBar = document.getElementById('status-bar');
         try {
@@ -94,11 +122,20 @@
             const data = await res.json();
             
             // API 응답 구조가 배열인지, 혹은 특정 객체 내부(예: data.words 등)에 있는지 체크하여 바인딩
-            currentList = Array.isArray(data) ? data : (data.words || data.data || []);
+            const apiWords = Array.isArray(data) ? data : (data.words || data.data || []);
+            const uniqueWords = new Map();
+            for (const item of apiWords) {
+                const key = getWord(item).normalize("NFC");
+                if (key && key !== "단어 없음" && !uniqueWords.has(key)) {
+                    uniqueWords.set(key, item);
+                }
+            }
+            currentList = [...uniqueWords.values()];
             
             if (currentList.length === 0) throw new Error("데이터가 비어있음");
             
-            statusBar.innerText = `성공: ${currentList.length}개의 단어 로드 완료`;
+            const duplicateCount = apiWords.length - currentList.length;
+            statusBar.innerText = `성공: ${currentList.length}개의 중복 없는 단어 로드 완료${duplicateCount ? ` (중복 ${duplicateCount}개 제외)` : ""}`;
             nextProblem();
         } catch (e) {
             statusBar.innerText = "🚨 API 로드 실패: 외부 서버 에러 혹은 CORS 차단";
@@ -112,10 +149,10 @@
     function nextProblem() {
         if (currentList.length === 0) return;
         
-        const item = currentList[Math.floor(Math.random() * currentList.length)];
+        const item = drawNextItem();
         
         // API의 다양한 필드명 템플릿 대응 (word, kanji, furigana, reading, meaning, definition 등)
-        const word = item.word || item.kanji || item.expression || "단어 없음";
+        const word = getWord(item);
         const reading = item.reading || item.furigana || item.yomikata || "";
         const meaning = item.meaning || item.definition || item.translation || "뜻 없음";
         const requestId = ++meaningRequestId;
