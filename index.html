@@ -8,7 +8,7 @@
         :root { --primary: #007aff; --bg: #f2f2f7; }
         body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 20px; display: flex; justify-content: center; }
         .container { width: 100%; max-width: 400px; }
-        .card { background: #fff; border-radius: 20px; padding: 40px 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); text-align: center; min-height: 280px; display: flex; flex-direction: column; justify-content: center; margin-bottom: 20px; border: 1px solid #e5e5ea; position: relative; }
+        .card { background: #fff; border-radius: 20px; padding: 40px 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); text-align: center; min-height: 280px; display: flex; flex-direction: column; justify-content: center; margin-bottom: 20px; border: 1px solid #e5e5ea; }
         .q { font-size: 3.5rem; font-weight: 800; color: #1c1c1e; margin: 0; word-break: keep-all; }
         .a { font-size: 1.5rem; color: var(--primary); margin: 40px 0 0; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
         .a.show { opacity: 1; visibility: visible; }
@@ -19,12 +19,23 @@
         .btn-ans { background: #e5e5ea; color: #1c1c1e; }
         .btn-next { background: var(--primary); color: white; }
         .btn-speak { flex: 0 0 auto; align-self: center; margin-top: 20px; padding: 12px 18px; background: #eaf3ff; color: var(--primary); }
+        .btn-input { width: 100%; margin-top: 12px; background: #fff; color: var(--primary); border: 1px solid #d1d1d6; }
         .voice-select { max-width: 100%; margin-top: 10px; padding: 8px 10px; border: 1px solid #d1d1d6; border-radius: 10px; background: #fff; font-size: 0.9rem; }
         .status { text-align: center; font-size: 0.75rem; color: #8e8e93; margin-top: 15px; }
+        .voice-settings { display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 10px; }
+        dialog { width: min(360px, calc(100% - 48px)); padding: 24px; border: 0; border-radius: 20px; box-shadow: 0 15px 40px rgba(0,0,0,.2); }
+        dialog::backdrop { background: rgba(0,0,0,.45); }
+        .dialog-title { margin: 0 0 8px; font-size: 1.35rem; }
+        .dialog-help { margin: 0 0 16px; color: #636366; font-size: .9rem; }
+        .japanese-input { box-sizing: border-box; width: 100%; padding: 14px; border: 1px solid #c7c7cc; border-radius: 12px; font-size: 1.2rem; }
+        .dialog-actions { display: flex; gap: 10px; margin-top: 14px; }
+        .dialog-actions button { padding: 14px 10px; }
+        .btn-cancel { background: #e5e5ea; color: #1c1c1e; }
+        .btn-play { background: var(--primary); color: #fff; }
+        @media (max-width: 420px) { body { padding: 16px; } .voice-settings { flex-direction: column; gap: 2px; } }
     </style>
 </head>
 <body>
-
 <div class="container">
     <div class="card" onclick="reveal()">
         <p id="q-txt" class="q">API 연결 중...</p>
@@ -36,19 +47,30 @@
         <button class="btn-ans" onclick="reveal()">정답 확인</button>
         <button class="btn-next" onclick="nextProblem()">다음 문제</button>
     </div>
+    <button class="btn-input" onclick="openSpeakDialog()">✍️ 일본어 입력하여 듣기</button>
     <p id="status-bar" class="status">데이터 요청 대기 중</p>
-    <div style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 10px;">
-        <label for="voice-select">CDN 호출 실패 시 재생할 일본어 음성</label>
+    <div class="voice-settings">
+        <label for="voice-select">일본어 음성 선택</label>
         <select id="voice-select" class="voice-select" aria-label="일본어 발음 음성 선택" disabled>
             <option>기기 음성 불러오는 중...</option>
         </select>
     </div>
 </div>
 
+<dialog id="speak-dialog" aria-labelledby="dialog-title">
+    <form method="dialog" id="speak-form">
+        <h2 class="dialog-title" id="dialog-title">일본어 입력하여 듣기</h2>
+        <p class="dialog-help">듣고 싶은 일본어 단어나 문장을 입력하세요.</p>
+        <input id="japanese-input" class="japanese-input" type="text" lang="ja" autocomplete="off" placeholder="예: こんにちは" aria-label="읽을 일본어 입력" required>
+        <div class="dialog-actions">
+            <button type="button" class="btn-cancel" onclick="closeSpeakDialog()">닫기</button>
+            <button type="submit" class="btn-play">🔊 듣기</button>
+        </div>
+    </form>
+</dialog>
+
 <script>
-    // 유저가 지정한 API 주소
     const BASE_API_URL = "https://jlpt-vocab-api.vercel.app/api/words?level=2&limit=100";
-    
     let currentList = [];
     let wordDeck = [];
     let lastWordKey = "";
@@ -63,27 +85,23 @@
     }
 
     function loadJapaneseVoices() {
+        if (!("speechSynthesis" in window)) return;
         const voiceSelect = document.getElementById('voice-select');
         const selectedVoice = japaneseVoices[Number(voiceSelect.value)];
         const selectedKey = selectedVoice ? voiceKey(selectedVoice) : "";
-
         japaneseVoices = speechSynthesis.getVoices()
             .filter(voice => voice.lang.toLowerCase().startsWith("ja"))
             .sort((a, b) => Number(b.default) - Number(a.default) || a.name.localeCompare(b.name));
-
         voiceSelect.replaceChildren();
         if (japaneseVoices.length === 0) {
             voiceSelect.add(new Option("사용 가능한 일본어 음성 없음", ""));
             voiceSelect.disabled = true;
             return;
         }
-
         japaneseVoices.forEach((voice, index) => {
-            const option = new Option(`${voice.name} (${voice.lang})`, String(index));
-            voiceSelect.add(option);
+            voiceSelect.add(new Option(`${voice.name} (${voice.lang})`, String(index)));
         });
         voiceSelect.disabled = false;
-
         const preferredIndex = japaneseVoices.findIndex(voice => voiceKey(voice) === selectedKey);
         const defaultIndex = japaneseVoices.findIndex(voice => voice.default);
         voiceSelect.value = String(preferredIndex >= 0 ? preferredIndex : Math.max(defaultIndex, 0));
@@ -100,16 +118,13 @@
                 const j = Math.floor(Math.random() * (i + 1));
                 [wordDeck[i], wordDeck[j]] = [wordDeck[j], wordDeck[i]];
             }
-
             if (wordDeck.length > 1 && getWord(wordDeck[wordDeck.length - 1]).normalize("NFC") === lastWordKey) {
                 const swapIndex = wordDeck.findIndex((item, index) =>
                     index < wordDeck.length - 1 && getWord(item).normalize("NFC") !== lastWordKey
                 );
-                [wordDeck[wordDeck.length - 1], wordDeck[swapIndex]] =
-                    [wordDeck[swapIndex], wordDeck[wordDeck.length - 1]];
+                [wordDeck[wordDeck.length - 1], wordDeck[swapIndex]] = [wordDeck[swapIndex], wordDeck[wordDeck.length - 1]];
             }
         }
-
         const item = wordDeck.pop();
         lastWordKey = getWord(item).normalize("NFC");
         return item;
@@ -120,22 +135,15 @@
         try {
             const res = await fetch(BASE_API_URL);
             if (!res.ok) throw new Error("서버 응답 에러");
-            
             const data = await res.json();
-            
-            // API 응답 구조가 배열인지, 혹은 특정 객체 내부(예: data.words 등)에 있는지 체크하여 바인딩
             const apiWords = Array.isArray(data) ? data : (data.words || data.data || []);
             const uniqueWords = new Map();
             for (const item of apiWords) {
                 const key = getWord(item).normalize("NFC");
-                if (key && key !== "단어 없음" && !uniqueWords.has(key)) {
-                    uniqueWords.set(key, item);
-                }
+                if (key && key !== "단어 없음" && !uniqueWords.has(key)) uniqueWords.set(key, item);
             }
             currentList = [...uniqueWords.values()];
-            
             if (currentList.length === 0) throw new Error("데이터가 비어있음");
-            
             const duplicateCount = apiWords.length - currentList.length;
             statusBar.innerText = `성공: ${currentList.length}개의 중복 없는 단어 로드 완료${duplicateCount ? ` (중복 ${duplicateCount}개 제외)` : ""}`;
             nextProblem();
@@ -151,19 +159,14 @@
     function nextProblem() {
         document.getElementById('reading-txt').classList.remove('show');
         document.getElementById('meaning-txt').classList.remove('show');
-
         if (currentList.length === 0) return;
-
         const item = drawNextItem();
-        
-        // API의 다양한 필드명 템플릿 대응 (word, kanji, furigana, reading, meaning, definition 등)
         const word = getWord(item);
         const reading = item.reading || item.furigana || item.yomikata || "";
         const meaning = item.meaning || item.definition || item.translation || "뜻 없음";
         const requestId = ++meaningRequestId;
         currentWord = word;
         currentReading = reading;
-
         document.getElementById('q-txt').innerText = word;
         document.getElementById('reading-txt').innerText = reading ? `읽기: ${reading}` : "";
         document.getElementById('meaning-txt').innerText = "한국어 뜻을 불러오는 중...";
@@ -177,22 +180,14 @@
                 const params = new URLSearchParams({ q: meaning, langpair: "en|ko" });
                 const res = await fetch(`https://api.mymemory.translated.net/get?${params}`);
                 if (!res.ok) throw new Error("번역 서버 응답 에러");
-
                 const data = await res.json();
                 translated = data.responseData?.translatedText;
-                if (data.responseStatus !== 200 || !translated) {
-                    throw new Error(data.responseDetails || "번역 결과가 없습니다.");
-                }
+                if (data.responseStatus !== 200 || !translated) throw new Error(data.responseDetails || "번역 결과가 없습니다.");
                 translationCache.set(meaning, translated);
             }
-
-            if (requestId === meaningRequestId) {
-                document.getElementById('meaning-txt').innerText = `한국어 뜻: ${translated}`;
-            }
+            if (requestId === meaningRequestId) document.getElementById('meaning-txt').innerText = `한국어 뜻: ${translated}`;
         } catch (e) {
-            if (requestId === meaningRequestId) {
-                document.getElementById('meaning-txt').innerText = `한국어 번역 실패 (원문: ${meaning})`;
-            }
+            if (requestId === meaningRequestId) document.getElementById('meaning-txt').innerText = `한국어 번역 실패 (원문: ${meaning})`;
             console.error(e);
         }
     }
@@ -202,42 +197,59 @@
         document.getElementById('meaning-txt').classList.add('show');
     }
 
-    function speakWord(event) {
-        event.stopPropagation();
-        if (!currentWord) return;
+    function speakJapanese(text) {
+        const statusBar = document.getElementById('status-bar');
         if (!("speechSynthesis" in window)) {
-            document.getElementById('status-bar').innerText = "이 브라우저는 발음 재생을 지원하지 않습니다.";
+            statusBar.innerText = "이 브라우저는 발음 재생을 지원하지 않습니다.";
             return;
         }
-
         loadJapaneseVoices();
         const voice = japaneseVoices[Number(document.getElementById('voice-select').value)];
         if (!voice) {
-            document.getElementById('status-bar').innerText = "기기 설정에서 일본어 음성을 설치한 뒤 다시 시도해 주세요.";
+            statusBar.innerText = "기기 설정에서 일본어 음성을 설치한 뒤 다시 시도해 주세요.";
             return;
         }
-
-        const utterance = new SpeechSynthesisUtterance(currentReading || currentWord);
+        const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = "ja-JP";
         utterance.voice = voice;
         utterance.rate = 0.9;
         speechSynthesis.cancel();
-        const audio = new Audio(`https://assets.languagepod101.com/dictionary/japanese/audiomp3.php?kana=${encodeURIComponent(currentReading || currentWord)}&kanji=${encodeURIComponent(currentWord)}`);
-        audio.play().catch(err => {
-            console.error("TTS 재생 실패:", err);
-            document.getElementById('status-bar').innerText = "TTS 재생 실패: 브라우저에서 오디오 재생을 허용했는지 확인하세요.";
-            speechSynthesis.speak(utterance);
-        });
+        speechSynthesis.speak(utterance);
     }
+
+    function speakWord(event) {
+        event.stopPropagation();
+        if (currentWord) speakJapanese(currentReading || currentWord);
+    }
+
+    function openSpeakDialog() {
+        const dialog = document.getElementById('speak-dialog');
+        dialog.showModal();
+        const input = document.getElementById('japanese-input');
+        input.value = "";
+        input.focus();
+    }
+
+    function closeSpeakDialog() {
+        document.getElementById('speak-dialog').close();
+    }
+
+    document.getElementById('speak-form').addEventListener('submit', event => {
+        event.preventDefault();
+        const text = document.getElementById('japanese-input').value.trim();
+        if (!text) return;
+        speakJapanese(text);
+    });
+
+    document.getElementById('speak-dialog').addEventListener('click', event => {
+        if (event.target === event.currentTarget) closeSpeakDialog();
+    });
 
     if ("speechSynthesis" in window) {
         loadJapaneseVoices();
         speechSynthesis.onvoiceschanged = loadJapaneseVoices;
     }
-
-    // 파일 구동 시 즉시 API 호출
     fetchData();
 </script>
-
 </body>
 </html>
