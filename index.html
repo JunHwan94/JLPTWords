@@ -50,7 +50,7 @@
     <button class="btn-input" onclick="openSpeakDialog()">✍️ 일본어 입력하여 듣기</button>
     <p id="status-bar" class="status">데이터 요청 대기 중</p>
     <div class="voice-settings">
-        <label for="voice-select">일본어 음성 선택</label>
+        <label for="voice-select">CDN 호출 실패 시 재생할 일본어 음성</label>
         <select id="voice-select" class="voice-select" aria-label="일본어 발음 음성 선택" disabled>
             <option>기기 음성 불러오는 중...</option>
         </select>
@@ -197,29 +197,41 @@
         document.getElementById('meaning-txt').classList.add('show');
     }
 
-    function speakJapanese(text) {
+    function speakJapanese(kana, kanji = kana) {
         const statusBar = document.getElementById('status-bar');
-        if (!("speechSynthesis" in window)) {
-            statusBar.innerText = "이 브라우저는 발음 재생을 지원하지 않습니다.";
-            return;
-        }
-        loadJapaneseVoices();
-        const voice = japaneseVoices[Number(document.getElementById('voice-select').value)];
-        if (!voice) {
-            statusBar.innerText = "기기 설정에서 일본어 음성을 설치한 뒤 다시 시도해 주세요.";
-            return;
-        }
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = "ja-JP";
-        utterance.voice = voice;
-        utterance.rate = 0.9;
-        speechSynthesis.cancel();
-        speechSynthesis.speak(utterance);
+        const fallbackToDeviceVoice = error => {
+            if (error) console.error("CDN 오디오 재생 실패:", error);
+            if (!("speechSynthesis" in window)) {
+                statusBar.innerText = "CDN 오디오 재생에 실패했고, 이 브라우저는 기기 음성 재생도 지원하지 않습니다.";
+                return;
+            }
+            loadJapaneseVoices();
+            const utterance = new SpeechSynthesisUtterance(kana || kanji);
+            utterance.lang = "ja-JP";
+            const voice = japaneseVoices[Number(document.getElementById('voice-select').value)];
+            if (voice) utterance.voice = voice;
+            utterance.rate = 0.9;
+            speechSynthesis.cancel();
+            speechSynthesis.speak(utterance);
+            statusBar.innerText = "CDN 호출 실패: 기기 일본어 음성으로 재생합니다.";
+        };
+
+        if ("speechSynthesis" in window) speechSynthesis.cancel();
+        const audioUrl = `https://assets.languagepod101.com/dictionary/japanese/audiomp3.php?kana=${encodeURIComponent(kana || kanji)}&kanji=${encodeURIComponent(kanji || kana)}`;
+        const audio = new Audio(audioUrl);
+        let fallbackStarted = false;
+        const fallbackOnce = error => {
+            if (fallbackStarted) return;
+            fallbackStarted = true;
+            fallbackToDeviceVoice(error);
+        };
+        audio.onerror = () => fallbackOnce(new Error("CDN 오디오를 불러오지 못했습니다."));
+        audio.play().catch(fallbackOnce);
     }
 
     function speakWord(event) {
         event.stopPropagation();
-        if (currentWord) speakJapanese(currentReading || currentWord);
+        if (currentWord) speakJapanese(currentReading || currentWord, currentWord);
     }
 
     function openSpeakDialog() {
@@ -238,7 +250,7 @@
         event.preventDefault();
         const text = document.getElementById('japanese-input').value.trim();
         if (!text) return;
-        speakJapanese(text);
+        speakJapanese(text, text);
     });
 
     document.getElementById('speak-dialog').addEventListener('click', event => {
